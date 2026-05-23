@@ -86,7 +86,7 @@ export default function ArScene({ onBack }: ArSceneProps) {
           loader.load(item.model, (gltf) => {
             const model = gltf.scene;
             model.scale.set(0.2, 0.2, 0.2); // Sesuaikan skala jika perlu
-            model.rotation.set(0, Math.PI, 0);
+            model.rotation.set(0, 0, 0);
             anchor.group.add(model);
 
             // Setup Animasi jika ada

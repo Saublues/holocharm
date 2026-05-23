@@ -1,25 +1,30 @@
-"use client";
-
-import { useEffect, useRef, useState } from "react";
-import { X, RefreshCcw } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Box } from "lucide-react"; // Import ikon Box untuk visual focus
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-// @ts-expect-error - mind-ar does not ship TypeScript declarations for this build.
+// @ts-ignore
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+
+// Import MindAR bawaan proyekmu
+// @ts-ignore
 import { MindARThree } from "mind-ar/dist/mindar-image-three.prod.js";
 
 interface ArSceneProps {
   onBack: () => void;
-  markerUrl: string;
-  modelUrl: string;
-  audioUrl: string;
 }
 
-export default function ArScene({
-  onBack,
-  markerUrl,
-  modelUrl,
-  audioUrl,
-}: ArSceneProps) {
+// DAFTAR DATA PRODUK (Urutan HARUS PERSIS sama dengan urutan pas kamu upload gambar di web compiler)
+const arItems = [
+  { index: 0, model: "/models/lngshot.glb", audio: "/audio/lngshot.mp3" },
+  { index: 1, model: "/models/hindia.glb", audio: "/audio/hindia.mp3" },
+  { index: 2, model: "/models/biguy.glb", audio: "/audio/biguy.mp3" },
+  { index: 3, model: "/models/blackbink.glb", audio: "/audio/blackpink.mp3" },
+  { index: 4, model: "/models/taylorswift.glb", audio: "/audio/auladik.mp3" },
+  { index: 5, model: "/models/love.glb", audio: "/audio/love.mp3" },
+  { index: 6, model: "/models/cascade.glb", audio: "/audio/nmixx.mp3" },
+];
+
+export default function ArScene({ onBack }: ArSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,14 +32,17 @@ export default function ArScene({
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let mindarThree: any = null;
-    let audio: HTMLAudioElement | null = null; // Tampung di luar biar bisa dimatiin pas keluar halaman
+    const activeAudios: { [key: number]: HTMLAudioElement } = {};
+    const mixers: THREE.AnimationMixer[] = [];
+    const clock = new THREE.Clock();
 
     const startAR = async () => {
       try {
-        // 1. Inisialisasi MindAR Three
+        // 1. Inisialisasi MindAR dengan 1 file .mind GABUNGAN
         mindarThree = new MindARThree({
           container: containerRef.current!,
-          imageTargetSrc: markerUrl,
+          imageTargetSrc: "/markers/targets.mind", // File gabungan marker master
+          // Kita panggil ID elemen overlay bidding yang ada di return JSX
           uiScanning: "#scanning-overlay",
         });
 
@@ -47,58 +55,63 @@ export default function ArScene({
         directLight.position.set(0, 10, 10);
         scene.add(directLight);
 
-        // 3. Tambahkan Anchor
-        const anchor = mindarThree.addAnchor(0);
+        // 3. Setup Loader + DRACO Compression Decoder
+        const loader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath(
+          "https://www.gstatic.com/draco/versioned/decoders/1.5.6/",
+        );
+        loader.setDRACOLoader(dracoLoader);
 
-        // 4. Logika Audio (Opsional, nyala kalau audioUrl diisi)
-        if (audioUrl) {
-          audio = new Audio(audioUrl);
+        // 4. LOOPING UNTUK DAFTARKAN SEMUA PRODUK SEKALIGUS
+        arItems.forEach((item) => {
+          const anchor = mindarThree.addAnchor(item.index);
+
+          // Setup Audio
+          const audio = new Audio(item.audio);
           audio.loop = true;
+          activeAudios[item.index] = audio;
 
+          // Kontrol On/Off Audio berdasarkan deteksi kamera
           anchor.onTargetFound = () => {
             audio
-              ?.play()
+              .play()
               .catch((err) => console.warn("Audio diblokir browser:", err));
           };
           anchor.onTargetLost = () => {
-            audio?.pause();
+            audio.pause();
           };
-        }
 
-        // 5. Load Model 3D & Siapkan Animasi
-        const loader = new GLTFLoader();
-        let mixer: THREE.AnimationMixer | null = null;
-        const clock = new THREE.Clock();
+          // Load model 3D
+          loader.load(item.model, (gltf) => {
+            const model = gltf.scene;
+            model.scale.set(0.2, 0.2, 0.2); // Sesuaikan skala jika perlu
+            model.rotation.set(0, Math.PI, 0);
+            anchor.group.add(model);
 
-        loader.load(modelUrl, (gltf) => {
-          const model = gltf.scene;
-          model.scale.set(0.2, 0.2, 0.2);
-          model.rotation.set(0, Math.PI, 0);
-          anchor.group.add(model);
-
-          // Cek dan mainkan animasi bawaan dari file .glb
-          if (gltf.animations && gltf.animations.length > 0) {
-            mixer = new THREE.AnimationMixer(model);
-            const action = mixer.clipAction(gltf.animations[0]);
-            action.play();
-          }
+            // Setup Animasi jika ada
+            if (gltf.animations && gltf.animations.length > 0) {
+              const mixer = new THREE.AnimationMixer(model);
+              const action = mixer.clipAction(gltf.animations[0]);
+              action.play();
+              mixers.push(mixer);
+            }
+          });
         });
 
-        // 6. Jalankan Engine MindAR
+        // 5. Jalankan Engine Kamera
         await mindarThree.start();
         setLoading(false);
 
-        // 7. Render Loop (termasuk update frame animasi)
+        // 6. Render Loop (Mengupdate seluruh animasi yang aktif)
         renderer.setAnimationLoop(() => {
           const delta = clock.getDelta();
-          if (mixer) mixer.update(delta); // Biar modelnya gerak!
+          mixers.forEach((mixer) => mixer.update(delta));
           renderer.render(scene, camera);
         });
       } catch (err) {
         console.error(err);
-        setError(
-          "Gagal mengakses kamera. Pastikan HTTPS aktif dan izin diberikan.",
-        );
+        setError("Gagal membuka kamera. Pastikan izin kamera diberikan.");
         setLoading(false);
       }
     };
@@ -106,16 +119,16 @@ export default function ArScene({
     startAR();
 
     // ==========================================
-    // FUNGSI CLEANUP (Saat user keluar halaman)
+    // CLEANUP SYSTEM (Mematikan semua aset saat keluar)
     // ==========================================
     return () => {
-      // 1. Matikan Audio
-      if (audio) {
+      // Matikan semua audio
+      Object.values(activeAudios).forEach((audio) => {
         audio.pause();
         audio.currentTime = 0;
-      }
+      });
 
-      // 2. Matikan Kamera (Force Stop biar lampu webcam mati)
+      // Matikan hardware kamera laptop/HP
       let stream: MediaStream | null = null;
       if (mindarThree?.video?.srcObject) {
         stream = mindarThree.video.srcObject as MediaStream;
@@ -123,78 +136,78 @@ export default function ArScene({
         const videoEl = document.querySelector("video");
         if (videoEl?.srcObject) stream = videoEl.srcObject as MediaStream;
       }
-
       if (stream?.getTracks) {
         stream.getTracks().forEach((track) => track.stop());
       }
 
-      // 3. Matikan Engine AR
+      // Matikan Engine MindAR
       if (mindarThree) {
         try {
           mindarThree.stop();
-        } catch (e) {
-          // Abaikan error diam-diam
-        }
+        } catch (e) {}
         if (mindarThree.renderer) {
           mindarThree.renderer.setAnimationLoop(null);
         }
       }
     };
-  }, [markerUrl, modelUrl, audioUrl]); // Pastikan props ini masuk dependency array
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black">
-      {/* Container untuk Video Kamera */}
-      <div ref={containerRef} className="w-full h-full" />
-
-      {/* CUSTOM UI OVERLAY */}
-      <div className="absolute inset-0 flex flex-col justify-between p-6 pointer-events-none">
-        {/* Top Header */}
-        <div className="flex justify-between items-center pointer-events-auto">
-          <button
-            onClick={onBack}
-            className="p-3 bg-white/20 backdrop-blur-lg rounded-full text-white border border-white/30 hover:bg-white/40 transition"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <div className="px-4 py-2 bg-[#BFD1F9]/80 backdrop-blur-md rounded-full text-black font-semibold text-sm">
-            Scanning Mode
-          </div>
+    // PERBAIKAN CSS: Background transparan agar kamera MindAR (z-index: -2) bisa terlihat
+    <div
+      ref={containerRef}
+      className="w-full h-screen relative bg-transparent overflow-hidden"
+    >
+      {/* Tombol Melayang untuk Kembali ke Landing Page */}
+      <button
+        onClick={onBack}
+        className="absolute top-6 left-6 z-50 flex items-center justify-center w-12 h-12 bg-white/20 backdrop-blur-md rounded-full text-white border border-white/30 hover:bg-white/40 transition-colors shadow-lg"
+      >
+        <ArrowLeft className="w-6 h-6" />
+      </button>
+      {/* Layar Loading Awal */}
+      {loading && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[#111111] text-white">
+          <div className="w-10 h-10 border-4 border-[#BFD1F9] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-[#BFD1F9] font-medium animate-pulse">
+            Membuka Kamera AR...
+          </p>
         </div>
+      )}
+      {/* Layar Error */}
+      {error && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#111111] text-red-400 p-4 text-center">
+          <p>{error}</p>
+        </div>
+      )}
+      <div
+        id="scanning-overlay"
+        className="hidden absolute inset-0 z-30 flex flex-col items-center justify-center bg-transparent pointer-events-none p-8 text-center overflow-hidden"
+      >
+        {/* Kotak Bidik Putus-putus */}
+        <div className="w-64 h-64 md:w-80 md:h-80 border-4 border-dashed border-[#BFD1F9] rounded-3xl relative flex items-center justify-center">
+          {/* Aksen Sudut (Mewah) */}
+          <div className="absolute top-[-4px] left-[-4px] w-10 h-10 border-t-8 border-l-8 border-white rounded-tl-[30px]"></div>
+          <div className="absolute top-[-4px] right-[-4px] w-10 h-10 border-t-8 border-r-8 border-white rounded-tr-[30px]"></div>
+          <div className="absolute bottom-[-4px] left-[-4px] w-10 h-10 border-b-8 border-l-8 border-white rounded-bl-[30px]"></div>
+          <div className="absolute bottom-[-4px] right-[-4px] w-10 h-10 border-b-8 border-r-8 border-white rounded-br-[30px]"></div>
 
-        {/* Middle Scanning Frame (Warna Aksen #BFD1F9) */}
-        {loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-50">
-            <RefreshCcw className="w-10 h-10 text-[#BFD1F9] animate-spin mb-4" />
-            <p className="text-white font-medium">Initializing Camera...</p>
-          </div>
-        )}
-
-        {/* Scanning Overlay (Target Marker) */}
-        <div id="scanning-overlay" className="hidden">
-          <div className="flex flex-col items-center">
-            <div className="w-64 h-64 border-2 border-[#BFD1F9] border-dashed rounded-3xl animate-pulse relative">
-              <div className="absolute top-[-2px] left-1/2 -translate-x-1/2 bg-[#BFD1F9] text-black text-[10px] px-2 py-0.5 rounded-full font-bold">
-                FOCUS TARGET
-              </div>
-            </div>
-            <p className="mt-8 text-[#BFD1F9] text-center font-medium drop-shadow-md">
-              Arahkan kamera ke marker untuk memunculkan 3D
+          {/* Ikon Box dan Teks Pusat */}
+          <div className="flex flex-col items-center animate-pulse">
+            <Box className="w-20 h-20 text-white drop-shadow-xl mb-6" />
+            <p className="text-white font-bold text-xl md:text-2xl tracking-tight">
+              Target Focused
             </p>
           </div>
         </div>
 
-        {/* Bottom Error/Status */}
-        {error && (
-          <div className="pointer-events-auto bg-red-500 text-white p-4 rounded-2xl text-center">
-            {error}
-          </div>
-        )}
-
-        <div className="flex justify-center pb-8">
-          <div className="p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 text-white/70 text-xs text-center max-w-[250px]">
-            Tip: Pastikan cahaya ruangan cukup untuk hasil tracking maksimal.
-          </div>
+        {/* Status Disclaimer & Tips Melayang di Bawah (Glassmorphism) */}
+        <div className="absolute bottom-12 w-[85%] max-w-sm left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-xl px-6 py-4 rounded-2xl shadow-2xl border border-white/20 flex flex-col gap-2">
+          <p className="text-sm text-white/90 font-medium leading-relaxed">
+            <strong className="text-white">Tips:</strong> Arahkan kamera pas ke
+            gambar. Pastikan pencahayaan terang dan gambar tidak terpotong
+            layar.
+          </p>
         </div>
       </div>
     </div>

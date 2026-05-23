@@ -1,38 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Menu,
-  X,
-  Play,
-  Zap,
-  Smartphone,
-  Sparkles,
-  Scan,
-  ArrowUpRight,
-  Box,
-  Camera,
-} from "lucide-react";
+import { Menu, X, Play, ArrowUpRight, Box, Camera, Scan } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const ArScene = dynamic(() => import("@/components/ArScene"), {
   ssr: false,
-  loading: () => <p className="text-slate-600">Loading AR Camera...</p>,
+  loading: () => (
+    <div className="w-full h-screen flex flex-col items-center justify-center bg-slate-900 text-white">
+      <div className="w-10 h-10 border-4 border-[#BFD1F9] border-t-transparent rounded-full animate-spin mb-4"></div>
+      <p className="text-[#BFD1F9] font-medium">Loading AR Camera...</p>
+    </div>
+  ),
 });
 
 export default function Home() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showAR, setShowAR] = useState(false); // State baru
+  const [showAR, setShowAR] = useState(false);
 
+  // Jika tombol diklik, langsung render kamera (Multi-target logic ada di dalam ArScene)
   if (showAR) {
-    return (
-      <ArScene
-        onBack={() => setShowAR(false)}
-        markerUrl="/markers/targets.mind"
-        modelUrl="/models/spongebob_squarepants.glb"
-        audioUrl="/audio/sound_kids.mp3"
-      />
-    );
+    return <ArScene onBack={() => setShowAR(false)} />;
   }
 
   return (
@@ -123,7 +111,7 @@ export default function Home() {
 
         {/* CTA Buttons */}
         <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
-          {/* Button 1: Get Started */}
+          {/* Button 1: Get Started -> LANGSUNG BUKA KAMERA */}
           <button
             onClick={() => setShowAR(true)}
             className="w-full sm:w-auto flex items-center justify-between gap-4 pl-6 pr-2 py-2 bg-white rounded-full text-slate-900 font-semibold shadow-md shadow-[#BFD1F9]/20 hover:shadow-lg hover:-translate-y-0.5 transition-all"
